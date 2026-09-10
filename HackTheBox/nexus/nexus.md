@@ -1,7 +1,5 @@
 # Nexus
 
-![alt text](images/logo.png)
-
 **Difficulty:** Easy  
 **OS:** Linux
 
